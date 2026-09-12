@@ -1,4 +1,4 @@
 # Deepflow-matching
 
-* **[El Jattari A.]([https://github.com/](https://github.com/adameljc))**
-* **[Dumonteil D.](https://github.com)**
+* **[A. EL JATTARI](https://github.com/adameljc)**
+* **[D. DUMONTEIL](https://github.com)**
