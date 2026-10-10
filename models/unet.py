@@ -6,7 +6,7 @@ class SinusoidalEmbedding(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
-
+ 
     def forward(self, t):
         device = t.device
         half_dim = self.dim // 2
