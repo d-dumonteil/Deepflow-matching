@@ -5,7 +5,7 @@ from omegaconf import DictConfig
 from torch.utils.tensorboard import SummaryWriter
 import torchvision.utils as vutils
 
-# Imports spécifiques au TPU
+# Imports spécifiques au TPU 
 import torch_xla.core.xla_model as xm
 
 from models.unet import UNetSmall
