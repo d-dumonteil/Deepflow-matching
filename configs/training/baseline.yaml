@@ -1,0 +1,7 @@
+epochs: 50
+batch_size: 128
+lr: 0.001
+weight_decay: 0.0001
+ema_decay: 0.999
+save_name: "model_baseline.pt"
+gpu_id: "0"
