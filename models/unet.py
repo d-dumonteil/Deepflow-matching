@@ -10,10 +10,22 @@ class SinusoidalEmbedding(nn.Module):
     def forward(self, t):
         device = t.device
         half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = t[:, None] * emb[None, :]
-        return torch.cat((emb.sin(), emb.cos()), dim=-1)
+
+        indices = torch.arange(half_dim, device=device).float()
+
+        facteur_echelle = math.log(10000.0) / (half_dim - 1)
+        frequences = torch.exp(-indices * facteur_echelle)
+
+        t_colonne = t.unsqueeze(1) #[B, 1]
+
+        frequences_ligne = frequences.unsqueeze(0) #[1, half_dim]
+
+        angles = t_colonne * frequences_ligne #[B, half_dim]
+
+        sinus = torch.sin(angles)  # [B, half_dim]
+        cosinus = torch.cos(angles)  # [B, half_dim]
+
+        return torch.cat([sinus, cosinus], dim=1)
 
 class Block(nn.Module):
     def __init__(self, in_ch, out_ch, time_dim):
