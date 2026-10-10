@@ -1,0 +1,7 @@
+defaults:
+  - model: unet
+  - training: baseline
+
+logging:
+  log_dir: "runs/cifar10_cfm"
+  sample_every: 10
