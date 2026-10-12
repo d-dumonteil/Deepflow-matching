@@ -1,18 +1,69 @@
+import os
 import torch
 
-def verify_hardware():
-    assert torch.cuda.is_available(), "Erreur : CUDA requis !"
-    name = torch.cuda.get_device_name(0)
-    print(f"Périphérique GPU détecté : {name}")
-    return name
+try:
+    import torch_xla.core.xla_model as xm
+    HAS_XLA = True
+except (ImportError, RuntimeError):
+    HAS_XLA = False
 
-class CUDATimer:
-    def __init__(self):
-        self.starter = torch.cuda.Event(enable_timing=True)
-        self.ender = torch.cuda.Event(enable_timing=True)
+
+def setup_device_and_env():
+    """Détecte l'accélérateur matériel et consigne les versions logicielles."""
+    if HAS_XLA and "TPU" in os.environ.get("PJRT_DEVICE", ""):
+        device = xm.xla_device()
+        device_name = f"TPU XLA (type: {xm.xla_device_hw(device)})"
+        is_xla = True
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+        device_name = f"CUDA GPU: {torch.cuda.get_device_name(0)}"
+        is_xla = False
+    else:
+        device = torch.device("cpu")
+        device_name = "CPU"
+        is_xla = False
+
+    print("=" * 60)
+    print(f"Dispositif de calcul détecté : {device_name}")
+    print(f"Version PyTorch : {torch.__version__}")
+    if not is_xla and torch.cuda.is_available():
+        print(f"Version CUDA : {torch.version.cuda}")
+    print("=" * 60)
+    return device, is_xla
+
+
+class HardwareTimer:
+    """Mesure rigoureuse du temps wall-clock avec barrière de synchronisation."""
+    def __init__(self, is_xla=False):
+        self.is_xla = is_xla
+        if not is_xla and torch.cuda.is_available():
+            self.starter = torch.cuda.Event(enable_timing=True)
+            self.ender = torch.cuda.Event(enable_timing=True)
+
     def start(self):
-        self.starter.record()
+        if self.is_xla:
+            xm.mark_step()
+            self.t0 = os.times().elapsed
+        elif torch.cuda.is_available():
+            self.starter.record()
+        else:
+            self.t0 = os.times().elapsed
+
     def stop(self):
-        self.ender.record()
-        torch.cuda.synchronize() # Indispensable pour éviter le masquage asynchrone
-        return self.starter.elapsed_time(self.ender) / 1000.0 # secondes
+        if self.is_xla:
+            xm.mark_step()
+            return os.times().elapsed - self.t0
+        elif torch.cuda.is_available():
+            self.ender.record()
+            torch.cuda.synchronize()
+            return self.starter.elapsed_time(self.ender) / 1000.0
+        else:
+            return os.times().elapsed - self.t0
+
+
+def save_checkpoint(state_dict, path, is_xla=False):
+    """Sauvegarde atomique évitant la corruption du graphe statique XLA."""
+    if is_xla:
+        xm.save(state_dict, path)
+    else:
+        torch.save(state_dict, path)
