@@ -12,12 +12,15 @@ def get_cifar10_loader(batch_size=128, num_workers=4, device=None):
         root="./data_cifar", train=True, download=True, transform=transform
     )
 
+    is_cuda = device is not None and getattr(device, "type", str(device)) == "cuda"
+
     loader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=False,
+        pin_memory=is_cuda,
+        persistent_workers=(num_workers > 0),
         drop_last=True,
     )
 

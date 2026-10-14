@@ -9,7 +9,7 @@ except (ImportError, RuntimeError):
 
 
 def setup_device_and_env():
-    """Détecte l'accélérateur matériel et consigne les versions logicielles."""
+    """Détecte l'accélérateur matériel et configure les backends optimaux."""
     if HAS_XLA and "TPU" in os.environ.get("PJRT_DEVICE", ""):
         device = xm.xla_device()
         device_name = f"TPU XLA (type: {xm.xla_device_hw(device)})"
@@ -18,6 +18,10 @@ def setup_device_and_env():
         device = torch.device("cuda")
         device_name = f"CUDA GPU: {torch.cuda.get_device_name(0)}"
         is_xla = False
+        # Optimisations spécifiques CUDA / Turing T4
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = False  # Turing n'a pas de TF32 natif (réservé Ampere+)
+        torch.backends.cudnn.allow_tf32 = False
     else:
         device = torch.device("cpu")
         device_name = "CPU"

@@ -1,5 +1,6 @@
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -11,7 +12,7 @@ from cleanfid import fid
 
 from models.unet import UNetSmall
 from solvers.ode import sample_ode
-from utils.hardware import setup_device_and_env
+from utils.gpu import setup_device_and_env
 
 
 def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
@@ -27,9 +28,9 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
 
 
-@torch.no_grad()
-def compute_dinov2_features(image_dir, device, batch_size=128):
-    """Extraction des embeddings DINOv2 (ViT-B/14) pour le calcul de la FID DINOv2."""
+@torch.inference_mode()
+def compute_dinov2_features(image_dir, device, batch_size=256):
+    """Extraction des embeddings DINOv2 (ViT-B/14) en FP16 pour la FID DINOv2."""
     dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitb14").to(device)
     dinov2.eval()
 
@@ -39,13 +40,21 @@ def compute_dinov2_features(image_dir, device, batch_size=128):
     ])
 
     dataset = torchvision.datasets.ImageFolder(image_dir, transform=transforms.ToTensor())
-    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4)
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=(device.type == "cuda"),
+    )
 
     features = []
+    is_cuda = device.type == "cuda"
     for imgs, _ in tqdm(loader, desc="Extraction DINOv2"):
-        imgs = transform(imgs).to(device)
-        feats = dinov2(imgs)
-        features.append(feats.cpu().numpy())
+        imgs = transform(imgs).to(device, non_blocking=True)
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=is_cuda):
+            feats = dinov2(imgs)
+        features.append(feats.float().cpu().numpy())
 
     features = np.concatenate(features, axis=0)
     mu = np.mean(features, axis=0)
@@ -53,10 +62,9 @@ def compute_dinov2_features(image_dir, device, batch_size=128):
     return mu, sigma
 
 
-@torch.no_grad()
-def compute_cace_and_is(image_dir, device, num_classes=10, batch_size=128):
+@torch.inference_mode()
+def compute_cace_and_is(image_dir, device, num_classes=10, batch_size=256):
     """Calcul de l'Inception Score et du Class-Aggregated Calibration Error (CACE)."""
-    # Chargement d'un classifieur pré-entraîné de référence pour CIFAR-10
     classifier = torchvision.models.resnet18(weights=None)
     classifier.fc = torch.nn.Linear(classifier.fc.in_features, num_classes)
     classifier = classifier.to(device)
@@ -66,33 +74,47 @@ def compute_cace_and_is(image_dir, device, num_classes=10, batch_size=128):
         image_dir,
         transform=transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)),
         ])
     )
-    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=4,
+        pin_memory=(device.type == "cuda"),
+    )
 
     preds = []
+    is_cuda = device.type == "cuda"
     for imgs, _ in tqdm(loader, desc="Audit CACE / IS"):
-        imgs = imgs.to(device)
-        logits = classifier(imgs)
-        probs = torch.softmax(logits, dim=1)
-        preds.append(probs.cpu())
+        imgs = imgs.to(device, non_blocking=True)
+        with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=is_cuda):
+            logits = classifier(imgs)
+            probs = torch.softmax(logits, dim=1)
+        preds.append(probs.float().cpu())
 
     preds = torch.cat(preds, dim=0).numpy()
 
-    # 1. Inception Score (IS)
+    # Inception Score
     py = np.mean(preds, axis=0)
-    scores = []
-    for i in range(preds.shape[0]):
-        pyx = preds[i, :]
-        scores.append(np.sum(pyx * np.log(pyx / (py + 1e-10) + 1e-10)))
+    scores = [
+        np.sum(preds[i, :] * np.log(preds[i, :] / (py + 1e-10) + 1e-10))
+        for i in range(preds.shape[0])
+    ]
     inception_score = np.exp(np.mean(scores))
 
-    # 2. CACE : écart absolu moyen par rapport à l'équiprobabilité (1/10 pour CIFAR-10)
+    # CACE
     uniform_target = 1.0 / num_classes
     cace = np.sum(np.abs(py - uniform_target))
 
     return inception_score, cace
+
+
+def _save_batch_worker(cpu_imgs, start_idx, target_dir):
+    """Tâche worker pour paralléliser l'écriture PNG sur disque."""
+    for i in range(cpu_imgs.shape[0]):
+        vutils.save_image(cpu_imgs[i], os.path.join(target_dir, f"{start_idx + i:05d}.png"))
 
 
 def main():
@@ -108,25 +130,47 @@ def main():
 
     output_dir = "generated_cifar10_eval"
     sub_img_dir = os.path.join(output_dir, "images")
+    if os.path.exists(sub_img_dir):
+        shutil.rmtree(sub_img_dir)
     os.makedirs(sub_img_dir, exist_ok=True)
 
-    NUM_SAMPLES = 50000  # Benchmark officiel CIFAR-10
-    BATCH_SIZE = 128
+    NUM_SAMPLES = 50000
+    BATCH_SIZE = 512  # Adapté aux 16 Go de VRAM de la T4 sur CIFAR-10
     STEPS = 20
-    METHOD = "euler"  # Testable avec "rk4" ou "dopri5" via torchdiffeq
+    METHOD = "euler"
+    is_cuda = (device.type == "cuda")
 
-    print(f"Génération de {NUM_SAMPLES} images via {METHOD} (NFE={STEPS})...")
+    print(f"Génération de {NUM_SAMPLES} images via {METHOD} (NFE={STEPS}) en FP16...")
     img_counter = 0
 
-    with torch.no_grad():
-        for _ in tqdm(range(0, NUM_SAMPLES, BATCH_SIZE)):
-            current_batch = min(BATCH_SIZE, NUM_SAMPLES - img_counter)
-            imgs = sample_ode(model, shape=(current_batch, 3, 32, 32), method=METHOD, steps=STEPS, device=device)
-            imgs = (imgs.clamp(-1.0, 1.0) + 1.0) / 2.0
+    # Pool de threads pour éviter que l'I/O disque ne bloque le calcul GPU
+    with ThreadPoolExecutor(max_workers=8) as io_pool:
+        futures = []
+        with torch.inference_mode():
+            pbar = tqdm(total=NUM_SAMPLES, desc="Génération d'échantillons")
+            while img_counter < NUM_SAMPLES:
+                current_batch = min(BATCH_SIZE, NUM_SAMPLES - img_counter)
+                
+                with torch.autocast(device_type="cuda", dtype=torch.float16, enabled=is_cuda):
+                    imgs = sample_ode(
+                        model,
+                        shape=(current_batch, 3, 32, 32),
+                        method=METHOD,
+                        steps=STEPS,
+                        device=device,
+                    )
+                    imgs = (imgs.clamp(-1.0, 1.0) + 1.0) * 0.5
 
-            for i in range(current_batch):
-                vutils.save_image(imgs[i].cpu(), os.path.join(sub_img_dir, f"{img_counter:05d}.png"))
-                img_counter += 1
+                imgs_cpu = imgs.float().cpu()
+                futures.append(io_pool.submit(_save_batch_worker, imgs_cpu, img_counter, sub_img_dir))
+
+                img_counter += current_batch
+                pbar.update(current_batch)
+            pbar.close()
+
+        print("Finalisation de l'écriture disque des images PNG...")
+        for f in futures:
+            f.result()
 
     print("\n--- 1. Évaluation Clean-FID (Inception-v3) ---")
     clean_fid_score = fid.compute_fid(
@@ -134,14 +178,14 @@ def main():
         dataset_name="cifar10",
         dataset_res=32,
         dataset_split="train",
-        mode="clean"
+        mode="clean",
+        device=device,
     )
     print(f"Score Clean-FID (Inception-v3) : {clean_fid_score:.2f}")
 
     print("\n--- 2. Évaluation FID DINOv2 (ViT-B/14) ---")
     mu_gen, sigma_gen = compute_dinov2_features(output_dir, device=device)
-    # Dans le protocole complet, mu_real et sigma_real sont précalculés sur CIFAR-10 train
-    mu_real, sigma_real = mu_gen, sigma_gen
+    mu_real, sigma_real = mu_gen, sigma_gen  # À remplacer par les stats de référence précalculées
     dinov2_fid = calculate_frechet_distance(mu_real, sigma_real, mu_gen, sigma_gen)
     print(f"Score FID (DINOv2) : {dinov2_fid:.2f}")
 

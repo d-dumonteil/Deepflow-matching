@@ -64,13 +64,12 @@ def train(cfg: DictConfig):
         timer.start()
 
         for x1, _ in loader:
-            x1 = x1.to(device)
+            x1 = x1.to(device, non_blocking=True)
             b = x1.shape[0]
             x0 = torch.randn_like(x1)
             t = torch.rand(b, device=device)
             t_expand = t.view(b, 1, 1, 1)
 
-            # Interpolation Flow Matching standard
             xt = (1.0 - t_expand) * x0 + t_expand * x1
             target = x1 - x0
 
