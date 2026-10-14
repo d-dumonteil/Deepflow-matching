@@ -6,7 +6,7 @@ class SinusoidalEmbedding(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
- 
+
     def forward(self, t):
         device = t.device
         half_dim = self.dim // 2
@@ -16,11 +16,9 @@ class SinusoidalEmbedding(nn.Module):
         facteur_echelle = math.log(10000.0) / (half_dim - 1)
         frequences = torch.exp(-indices * facteur_echelle)
 
-        t_colonne = t.unsqueeze(1) #[B, 1]
-
-        frequences_ligne = frequences.unsqueeze(0) #[1, half_dim]
-
-        angles = t_colonne * frequences_ligne #[B, half_dim]
+        t_colonne = t.unsqueeze(1)  # [B, 1]
+        frequences_ligne = frequences.unsqueeze(0)  # [1, half_dim]
+        angles = t_colonne * frequences_ligne  # [B, half_dim]
 
         sinus = torch.sin(angles)  # [B, half_dim]
         cosinus = torch.cos(angles)  # [B, half_dim]
@@ -45,7 +43,7 @@ class Block(nn.Module):
         return h + self.res(x)
 
 class UNetSmall(nn.Module):
-    def __init__(self, in_channels=3, base_ch=64):
+    def __init__(self, in_channels=3, out_channels=3, base_ch=64):
         super().__init__()
         time_dim = base_ch * 4
         self.time_mlp = nn.Sequential(
@@ -65,13 +63,8 @@ class UNetSmall(nn.Module):
         self.b_up2 = Block(base_ch * 4, base_ch * 2, time_dim)
         self.up1 = nn.ConvTranspose2d(base_ch * 2, base_ch, 4, stride=2, padding=1)
         self.b_up1 = Block(base_ch * 2, base_ch, time_dim)
-        self.out = nn.Conv2d(base_ch, in_channels, 3, padding=1)
+        self.out = nn.Conv2d(base_ch, out_channels, 3, padding=1)
 
     def forward(self, x, t):
         t_emb = self.time_mlp(t)
         h1 = self.b1(x, t_emb)
-        h2 = self.b2(self.down1(h1), t_emb)
-        h_mid = self.mid(self.down2(h2), t_emb)
-        h_up2 = self.b_up2(torch.cat([self.up2(h_mid), h2], dim=1), t_emb)
-        h_up1 = self.b_up1(torch.cat([self.up1(h_up2), h1], dim=1), t_emb)
-        return self.out(h_up1)

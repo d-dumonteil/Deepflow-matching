@@ -1,6 +1,7 @@
 defaults:
   - model: unet
   - training: baseline
+  - _self_
 
 logging:
   log_dir: "runs/cifar10_cfm"
