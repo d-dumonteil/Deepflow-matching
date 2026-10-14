@@ -47,7 +47,6 @@ def train(cfg: DictConfig):
     ema = EMA(model, decay=cfg.training.ema_decay)
     loader = get_cifar10_loader(batch_size=cfg.training.batch_size, device=device)
 
-    # Précision mixte : native bfloat16 sur TPU, fp16 + GradScaler sur GPU T4
     use_cuda_amp = (not is_xla) and (device.type == "cuda")
     scaler = torch.cuda.amp.GradScaler(enabled=use_cuda_amp)
     amp_dtype = torch.bfloat16 if is_xla else torch.float16
@@ -101,7 +100,6 @@ def train(cfg: DictConfig):
         writer.add_scalar("Loss/CFM", mean_loss, epoch)
         writer.add_scalar("Time/Epoch", epoch_time, epoch)
 
-        # Checkpointage régulier et reprise (toutes les 10 époques ou meilleure loss)
         if epoch % 10 == 0 or mean_loss < best_loss:
             if mean_loss < best_loss:
                 best_loss = mean_loss
@@ -121,15 +119,15 @@ def train(cfg: DictConfig):
             model.eval()
             with torch.no_grad():
                 samples = sample_euler(model, shape=(16, 3, 32, 32), steps=20, device=device)
-                samples = (samples.clamp(-1.0, 1.0) + 1.0) / 2.0
+                samples = (samples.clamp(-1.0, 1.0) + 1.0) * 0.5
                 grid = vutils.make_grid(samples.cpu(), nrow=4)
                 writer.add_image("Samples/Generated", grid, epoch)
             ema.restore(model)
 
-    # Sauvegarde finale avec application stricte des poids EMA
+    # Sauvegarde finale avec application des poids lissés EMA
     ema.apply_shadow(model)
     final_path = os.path.join(orig_cwd, cfg.training.save_name)
-    save_checkpoint(model.state_dict(), final_path, is_xla=is_xla)
+    save_checkpoint({"model_state": model.state_dict()}, final_path, is_xla=is_xla)
     print(f"Modèle EMA final sauvegardé sous {final_path}.")
     writer.close()
 
