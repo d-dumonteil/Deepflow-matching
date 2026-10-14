@@ -10,7 +10,7 @@ import torchvision.utils as vutils
 from models.unet import UNetSmall
 from data.dataset import get_cifar10_loader
 from utils.ema import EMA
-from utils.hardware import setup_device_and_env, HardwareTimer, save_checkpoint
+from utils.gpu import setup_device_and_env, HardwareTimer, save_checkpoint
 from solvers.ode import sample_euler
 
 
