@@ -39,16 +39,16 @@ def main():
 
     mini = np.array([8., 10.])
     print(champ_exact(4.0, 0.0, mini))                       
-    print(champ_exact(4.0, 0.5, mini))                         # [8.47681169]
+    print(champ_exact(4.0, 0.5, mini))                        
 
     data2d = np.array([[8., 0.], [10., 0.]])
-    print(champ_exact([4., 0.], 0.5, data2d))                  # [8.47681169  0.        ]
-    print(champ_exact([4., 2.], 0.5, data2d))                  # [ 8.47681169 -4.        ]
+    print(champ_exact([4., 0.], 0.5, data2d))                 
+    print(champ_exact([4., 2.], 0.5, data2d))             
 
-    print(champ_exact(0.9999 * 8.0, 0.9999, mini))             # [8.]  (limite t proche de 1)
+    print(champ_exact(0.9999 * 8.0, 0.9999, mini))       
 
-    print(cible_efm(-2.0, 8.0, 0.5, [3.0]))                    # [9.2408...]
-    print(cible_efm(-2.0, 8.0, 0.999, [3.0]))                   # [10.]
+    print(cible_efm(-2.0, 8.0, 0.5, [3.0]))                   
+    print(cible_efm(-2.0, 8.0, 0.999, [3.0]))                   
 
 
 if __name__ == "__main__":
