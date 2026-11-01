@@ -31,10 +31,7 @@ def tirer_support(M, data):
 
 
 def main():
-    data = np.concatenate([
-        np.random.normal(3, 1, size=(100, 2)),
-        np.random.normal(-3, 1, size=(100, 2)),
-    ])
+    data = np.concatenate([np.random.normal(3, 1, size=(100, 2)),np.random.normal(-3, 1, size=(100, 2)),])
     print(data.shape)                                        
 
     mini = np.array([8., 10.])
