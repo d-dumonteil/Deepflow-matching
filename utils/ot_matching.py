@@ -1,6 +1,5 @@
 import numpy as np 
 
-
 def appariement_ot_hongrois(x0, x1, sur_device=False):
     return 
 
