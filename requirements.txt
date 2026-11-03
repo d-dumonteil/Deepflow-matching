@@ -1,6 +1,8 @@
+
 # PyTorch & Vision (pour CUDA 12.x / 11.8 sur T4)
 torch>=2.1.0
 torchvision>=0.16.0
+
 
 # Solveurs différentiels pour CFM / ODE
 torchdiffeq>=0.2.3
