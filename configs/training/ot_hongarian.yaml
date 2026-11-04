@@ -1,0 +1,5 @@
+defaults:
+  - baseline
+
+matching: "ot_hongarian"
+save_name: "model_ot_hongarian.pt"

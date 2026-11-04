@@ -10,6 +10,7 @@ import torchvision.utils as vutils
 from models.unet import UNetSmall
 from data.dataset import get_cifar10_loader
 from utils.ema import EMA
+from utils.ot_matching import obtenir_appariement, cout_transport_batch
 from utils.gpu import setup_device_and_env, HardwareTimer, save_checkpoint
 from solvers.ode import sample_euler
 
@@ -46,6 +47,7 @@ def train(cfg: DictConfig):
     )
     ema = EMA(model, decay=cfg.training.ema_decay)
     loader = get_cifar10_loader(batch_size=cfg.training.batch_size, device=device)
+    appariement = obtenir_appariement(cfg.training.get("matching", "random"))
 
     use_cuda_amp = (not is_xla) and (device.type == "cuda")
     scaler = torch.cuda.amp.GradScaler(enabled=use_cuda_amp)
@@ -62,10 +64,11 @@ def train(cfg: DictConfig):
         total_loss = 0.0
         timer.start()
 
-        for x1, _ in loader:
+        for i_batch, (x1, _) in enumerate(loader):
             x1 = x1.to(device, non_blocking=True)
             b = x1.shape[0]
             x0 = torch.randn_like(x1)
+            x1, perm = appariement(x0, x1) 
             t = torch.rand(b, device=device)
             t_expand = t.view(b, 1, 1, 1)
 
@@ -92,6 +95,9 @@ def train(cfg: DictConfig):
 
             ema.update(model)
             total_loss += loss.item()
+            if i_batch == len(loader) - 1:   #dernier batch seulement
+                cout_ot = cout_transport_batch(x0, x1, perm, reduction="mean").item()
+                writer.add_scalar("OT/CoutTransport", cout_ot, epoch)
 
         epoch_time = timer.stop()
         mean_loss = total_loss / len(loader)
