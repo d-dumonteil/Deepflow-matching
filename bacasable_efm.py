@@ -30,7 +30,7 @@ def tirer_support(M, data):
     return data[tirage]                                        
 
 
-def main():
+def main(): #tests générés par IA
     data = np.concatenate([np.random.normal(3, 1, size=(100, 2)),np.random.normal(-3, 1, size=(100, 2)),])
     print(data.shape)                                        
 
