@@ -7,11 +7,18 @@ import torch
 np.random.seed(42)
 
 
-def generer_donnees_2d(n_par_amas, forme="croissants", bruit=0.3):
-    return 
+def generer_donnees_bacasable_2d(n_par_amas, forme="croissants"):
+    if forme=="croissants":
+        A = np.random.uniform(n_par_amas)
+        B = np.random.uniform(n_par_amas)
+        A=np.concatenate([np.cos(A), np.sin(A)])
+        B=np.concatenate([1-np.cos(B), 0.5-np.sin(B)])
+        return A,B
+    else:
+        return np.random.normal((2,n_par_amas)),np.random.normal((2,n_par_amas))
 
-def generer_bruits(n, seed=None):
-    return
+def generer_bruits(n):
+    return np.random.normal((2,n))
 
 def integrer_prof_rk45(z, data, rtol=1e-8, atol=1e-8, retour_trajet=False):
     return 
