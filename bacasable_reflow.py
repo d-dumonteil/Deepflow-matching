@@ -5,6 +5,7 @@ from scipy.integrate import solve_ivp
 
 import numpy as np
 import torch 
+import math as mt
 
 np.random.seed(42)
 
@@ -41,10 +42,17 @@ def integrer_prof_rk45(z, data, rtol=1e-8, atol=1e-8, retour_trajet=False):
     return sol.y[:, -1].reshape(-1, 2)
 
 def generer_paires(n, data):
-    return
+    z = generer_bruits(n)
+    g=integrer_prof_rk45(z, data)
+    return z,g
 
-def champ_reflow_nw(x, t, Z, G, eps=0.05):
-    return
+def champ_reflow_nw(x, t, z, g, eps=0.05):
+    instant_i=z+t*(z-g)
+    distance = np.sum((x - instant_i) ** 2, axis=1)        
+    lambda_i = np.exp(-distance / (2 * max(1 - t, eps) ** 2))
+    lambda_i = lambda_i / lambda_i.sum()                       
+    moy = lambda_i @ instant_i                                    
+    return (moy - x) / max(1 - t, eps)   
 
 def entrainer_mlp_reflow(Z, G, n_epochs=2000, lr=1e-3):
     return 
@@ -55,11 +63,23 @@ def integrer_euler(champ, z, n_pas, retour_trajet=False):
 def cout_transport(Z, G):
     return np.square(np.linalg.norm(Z-G))/len(Z)
 
+def cote(a, b, c):
+    dx = b[0] - a[0]
+    if dx == 0:                                  
+        return np.sign(c[0] - a[0])
+    s = (b[1] - a[1]) / dx                        
+    return np.sign(c[1] - (a[1] + s * (c[0] - a[0])))   
+
 def segments_se_croisent(p1, q1, p2, q2):
-    return 
+    return (cote(p1, q1, p2) * cote(p1, q1, q2) < 0) and (cote(p2, q2, p1) * cote(p2, q2, q1) < 0)
 
 def compter_croisements(Z, G):
-    return 
+    acc = 0
+    for i in range(len(Z) - 1):
+        for j in range(i + 1, len(Z)):
+            if segments_se_croisent(Z[i], G[i], Z[j], G[j]):
+                acc += 1
+    return acc
 
 def rectitude(trajets, Z, G):
     return 
