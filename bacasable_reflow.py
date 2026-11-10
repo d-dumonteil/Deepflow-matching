@@ -6,6 +6,7 @@ from scipy.integrate import solve_ivp
 import numpy as np
 import torch 
 import math as mt
+from ot import emd2
 
 np.random.seed(42)
 
@@ -82,10 +83,13 @@ def compter_croisements(Z, G):
     return acc
 
 def rectitude(trajets, Z, G):
-    return 
+    trajet_ligne = np.sum((Z-G)**2, axis=1)
+    trajet_courbe = np.sum(trajets.diff**2, axis=1)
+    return trajet_courbe/trajet_ligne
 
 def distance_w1(echantillons, data):
-    return 
+    
+    return emd2(echantillons @ data)
 
 def courbe_erreur_nfe(champ, data, liste_pas=(1, 2, 4, 8, 20),n_test=2000):
     return 

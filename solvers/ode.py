@@ -3,7 +3,6 @@ from torchdiffeq import odeint
 
 @torch.no_grad()
 def sample_euler(model, shape, steps=20, device=None):
-    """Solveur d'Euler explicite vectorisé."""
     if device is None:
         device = next(model.parameters()).device
     x = torch.randn(shape, device=device)
@@ -18,7 +17,6 @@ def sample_euler(model, shape, steps=20, device=None):
 
 @torch.no_grad()
 def sample_ode(model, shape, method="euler", steps=20, device=None, atol=1e-5, rtol=1e-5):
-    """Solveur généralisé interfacé avec torchdiffeq (rk4, dopri5, euler)."""
     if device is None:
         device = next(model.parameters()).device
     x0 = torch.randn(shape, device=device)
@@ -39,10 +37,8 @@ def sample_ode(model, shape, method="euler", steps=20, device=None, atol=1e-5, r
         trajectory = odeint(ode_fn, x0, t_span, method="euler")
     elif method == "rk4":
         trajectory = odeint(ode_fn, x0, t_span, method="rk4")
-    elif method == "dopri5":
+    else: #dopri5
         t_eval = torch.tensor([0.0, 1.0], device=device)
         trajectory = odeint(ode_fn, x0, t_eval, method="dopri5", atol=atol, rtol=rtol)
-    else:
-        raise ValueError(f"Méthode {method} non supportée.")
 
     return trajectory[-1]

@@ -13,7 +13,6 @@ class EMA:
     def update(self, model):
         params = [param.data for name, param in model.named_parameters() if param.requires_grad]
         shadows = [self.shadow[name] for name, param in model.named_parameters() if param.requires_grad]
-        # Opération vectorisée groupée (rapide sur GPU T4)
         torch._foreach_lerp_(shadows, params, 1.0 - self.decay)
 
     def apply_shadow(self, model):
