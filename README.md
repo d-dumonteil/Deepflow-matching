@@ -2,4 +2,4 @@
 
 Contributors:
 * **[A. EL JATTARI](https://github.com/adameljc)**
-* **[D. DUMONTEIL](https://github.com)**
+* **[D. DUMONTEIL](https://github.com)** 
