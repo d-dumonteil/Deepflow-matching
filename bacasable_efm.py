@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 np.random.seed(42)
 
 
@@ -23,6 +24,18 @@ def cible_efm(x0, x1, t, autres, eps=1e-4):
     lambda_i = lambda_i / lambda_i.sum()
     moy = lambda_i @ support                             
     return (moy - x_t) / max(1 - t, eps)
+
+def cible_efm_vectorise(xt, t, support, eps=1e-2):
+    t = torch.clamp(t, max=1.0 - eps) # denominateur non nul
+    xt_m = xt[:, None] 
+    distance = torch.sum((xt_m-t[:, None, None, None, None]*support)**2, dim = (2, 3, 4)) 
+    vk = -distance/(2*(1-t[:, None])**2)
+    uk = torch.softmax(vk, dim=1)
+    moy = torch.sum(uk[:, :, None, None, None]*(support-xt_m)/(1-t[:, None, None, None, None]), dim = 1)
+    return moy
+
+
+
 
 
 def tirer_support(M, data):
