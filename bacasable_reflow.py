@@ -7,6 +7,9 @@ import numpy as np
 import torch 
 import math as mt
 from ot import emd2
+import matplotlib.pyplot as plt
+
+from matplotlib.ticker import NullFormatter
 
 np.random.seed(42)
 
@@ -16,6 +19,7 @@ def generer_donnees_bacasable_2d(n_par_amas, forme="croissants"):
         A = np.random.uniform(0,np.pi,n_par_amas)
         B = np.random.uniform(0,np.pi,n_par_amas)
         A=np.column_stack([np.cos(A), np.sin(A)])
+        B=np.column_stack([1-np.cos(B), 0.5-np.sin(B)])
         data = np.vstack([A, B])                    # (2n, 2)
         return data + np.random.normal(0, 0.1, data.shape)  # on épaissit les arcs
     else:
@@ -25,7 +29,7 @@ def generer_bruits(n):
     return np.random.normal(0,1,(n,2))
 
 
-def integrer_prof_rk45(z, data, rtol=1e-8, atol=1e-8, retour_trajet=False):
+def integrer_rk45(z, data, rtol=1e-8, atol=1e-8, retour_trajet=False):
     def derivee_scipy(t, y):
         pts = y.reshape(-1, 2)
         return champ_exact(pts, t, data).reshape(-1)
@@ -44,13 +48,13 @@ def integrer_prof_rk45(z, data, rtol=1e-8, atol=1e-8, retour_trajet=False):
 
 def generer_paires(n, data):
     z = generer_bruits(n)
-    g=integrer_prof_rk45(z, data)
+    g=integrer_rk45(z, data)
     return z,g
 
 def champ_reflow_nw(x, t, z, g, eps=0.05):
-    instant_i=z+t*(z-g)
+    instant_i=z+t*(g-z)
     distance = np.sum((x - instant_i) ** 2, axis=1)        
-    lambda_i = np.exp(-distance / (2 * max(1 - t, eps) ** 2))
+    lambda_i = np.exp(-distance / (2 * eps ** 2))
     lambda_i = lambda_i / lambda_i.sum()                       
     moy = lambda_i @ instant_i                                    
     return (moy - x) / max(1 - t, eps)   
@@ -58,8 +62,17 @@ def champ_reflow_nw(x, t, z, g, eps=0.05):
 def entrainer_mlp_reflow(Z, G, n_epochs=2000, lr=1e-3):
     return 
 
-def integrer_euler(champ, z, n_pas, retour_trajet=False):
-    return 
+def integrer_euler(champ, z, n_pas, retour_trajet=False):  
+    if retour_trajet:
+        t_eval = np.linspace(0.0, 1 - 1e-4, n_pas)/n_pas
+    else:
+        t_eval = [1 - 1e-4]/n_pas
+
+
+    if retour_trajet:
+        trajets = sol.y.T.reshape(201, -1, 2)   
+        return trajets[-1], trajets                 
+    return sol.y[:, -1].reshape(-1, 2)
 
 def cout_transport(Z, G):
     return np.square(np.linalg.norm(Z-G))/len(Z)
@@ -88,22 +101,108 @@ def rectitude(trajets, Z, G):
     return trajet_courbe/trajet_ligne
 
 def distance_w1(echantillons, data):
-    
-    return emd2(echantillons @ data)
+    n = len(echantillons)
+    m = len(data)
+    x0f = echantillons.reshape(echantillons.shape[0], -1).float() 
+    x1f = data.reshape(data.shape[0], -1).float() 
+    n0 = (x0f ** 2).sum(dim=1, keepdim=True) 
+    n1 = (x1f ** 2).sum(dim=1).unsqueeze(0)   
+    C=np.sqrt(n0 + n1 -2*x0f@x1f.T)
+    a = (1/n)*np.ones(n)
+    b = (1/m)*np.ones(m)
+    return emd2(a, b, C)
 
-def courbe_erreur_nfe(champ, data, liste_pas=(1, 2, 4, 8, 20),n_test=2000):
-    return 
+def courbe_erreur_nfe(champ, data, bruits, liste_pas=(1, 2, 4, 8, 20),n_test=2000):
+    d = {}
+    for i in liste_pas:
+        d[i] = distance_w1(integrer_euler(champ, bruits, i), data)
+    return d
 
-def figure_trajectoires(trajets_base, trajets_reflow, data, chemin):
-    return 
+def figure_trajectoires(trajets_base, trajets_reflow, data, chemin, n_traj=30):
+    """Deux panneaux : trajectoires du champ de base vs champ reflow.
+    trajets_* : (K+1, n, 2) — axe 0 = temps. Mêmes départs des deux côtés."""
+    fig, (ax_g, ax_d) = plt.subplots(1, 2, figsize=(11, 5))
 
-def figure_croisements(Z_a, G_a, Z_b, G_b, chemin):
-    return 
+    # bornes communes pour les deux panneaux (comparaison honnête)
+    tout = np.vstack([data, trajets_base[-1], trajets_reflow[-1]])
+    x_min, y_min = tout.min(axis=0)
+    x_max, y_max = tout.max(axis=0)
 
-def figure_nfe(courbes: dict, chemin):
-    return 
+    for ax, trajets, titre in [
+        (ax_g, trajets_base, "Champ de base (trajectoires courbes)"),
+        (ax_d, trajets_reflow, "Champ reflow (trajectoires quasi droites)"),
+    ]:
+        ax.scatter(data[:, 0], data[:, 1], s=3, color="lightgrey", alpha=0.6, zorder=1)
+        for i in range(n_traj):                      # mêmes indices des deux côtés
+            ax.plot(trajets[:, i, 0], trajets[:, i, 1],
+                    linewidth=0.8, alpha=0.6, zorder=2)
+        ax.scatter(trajets[0, :n_traj, 0], trajets[0, :n_traj, 1],
+                   s=12, color="black", zorder=3)    # points de départ
+        ax.set_xlim(x_min - 0.3, x_max + 0.3)
+        ax.set_ylim(y_min - 0.3, y_max + 0.3)
+        ax.set_aspect("equal")
+        ax.set_title(titre)
+        ax.grid(alpha=0.2)
 
-def main():
+    fig.tight_layout()
+    fig.savefig(chemin, dpi=150)
+    plt.close(fig)
+
+def figure_croisements(Z_a, G_a, Z_b, G_b, chemin, n_seg=500):
+    """Gauche : couplage indépendant. Droite : couplage reflow.
+    Segments gris = non croisés, rouges = impliqués dans un croisement.
+    Le compte dans le titre porte sur le couplage COMPLET, pas le sous-échantillon."""
+    fig, (ax_g, ax_d) = plt.subplots(1, 2, figsize=(11, 5))
+
+    for ax, Z, G, titre in [
+        (ax_g, Z_a, G_a, "Couplage indépendant"),
+        (ax_d, Z_b, G_b, "Couplage reflow"),
+    ]:
+        n = len(Z)
+        total, paires = compter_croisements(Z, G)          # comptage complet
+        croises = {i for i, j in paires} | {j for i, j in paires}
+
+        sous = np.random.choice(n, size=min(n_seg, n), replace=False)
+        for k in sous:                                      # les autres, gris et fins
+            if k not in croises:
+                ax.plot([Z[k, 0], G[k, 0]], [Z[k, 1], G[k, 1]],
+                        linewidth=0.7, alpha=0.3, color="grey", zorder=1)
+        for i, j in paires:                                  # les croisants, rouges et épais
+            ax.plot([Z[i, 0], G[i, 0]], [Z[i, 1], G[i, 1]],
+                    linewidth=1.3, color="red", alpha=0.8, zorder=2)
+            ax.plot([Z[j, 0], G[j, 0]], [Z[j, 1], G[j, 1]],
+                    linewidth=1.3, color="red", alpha=0.8, zorder=2)
+
+        ax.set_title(f"{titre} : {total} croisements")
+        ax.set_aspect("equal")
+        ax.grid(alpha=0.2)
+
+    fig.tight_layout()
+    fig.savefig(chemin, dpi=150)
+    plt.close(fig)
+
+def figure_nfe(courbes, chemin):
+    """W1 vs nombre de pas, une courbe par champ.
+    courbes : {nom du champ -> {k -> W1}}, le dict rendu par courbe_erreur_nfe."""
+    fig, ax = plt.subplots(figsize=(7, 5))
+
+    for nom, d in courbes.items():
+        ks = sorted(d)
+        ax.plot(ks, [d[k] for k in ks], marker="o", label=nom)
+
+    ax.set_xscale("log")
+    ax.set_xticks([1, 2, 4, 8, 20])
+    ax.xaxis.set_minor_formatter(NullFormatter())   # pas de graduations intermédiaires
+    ax.set_xlabel("Nombre de pas Euler (NFE)")
+    ax.set_ylabel("Distance W1 aux données")
+    ax.legend()
+    ax.grid(alpha=0.3, which="both")
+
+    fig.tight_layout()
+    fig.savefig(chemin, dpi=150)
+    plt.close(fig)
+
+def main(): 
 
     return 0
 
