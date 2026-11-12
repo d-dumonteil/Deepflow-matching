@@ -1,3 +1,4 @@
+
 import numpy as np
 import torch
 np.random.seed(42)
@@ -33,6 +34,16 @@ def cible_efm_vectorise(xt, t, support, eps=1e-2):
     uk = torch.softmax(vk, dim=1)
     moy = torch.sum(uk[:, :, None, None, None]*(support-xt_m)/(1-t[:, None, None, None, None]), dim = 1)
     return moy
+
+def creer_support(x1, M, data, generator=None):
+    B, C, H, W = x1.shape
+    n = data.shape[0]
+    generator = torch.Generator(device=x1.device)
+    indices = torch.randint(0, n, (B, M - 1), device=x1.device, generator=generator)
+    support = torch.empty(B, M, C, H, W, device=x1.device, dtype=x1.dtype)
+    support[:, 0] = x1
+    support[:,1:] = data[indices]
+    return support
 
 
 
