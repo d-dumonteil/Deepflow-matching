@@ -68,3 +68,8 @@ class UNetSmall(nn.Module):
     def forward(self, x, t):
         t_emb = self.time_mlp(t)
         h1 = self.b1(x, t_emb)
+        h2 = self.b2(self.down1(h1), t_emb)
+        h = self.mid(self.down2(h2), t_emb)
+        h = self.b_up2(torch.cat([self.up2(h), h2], dim=1), t_emb)
+        h = self.b_up1(torch.cat([self.up1(h), h1], dim=1), t_emb)
+        return self.out(h)

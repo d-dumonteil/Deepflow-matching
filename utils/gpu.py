@@ -1,5 +1,7 @@
 import os
 import torch
+import time
+
 
 try:
     import torch_xla.core.xla_model as xm
@@ -40,3 +42,32 @@ def setup_device_and_env():
         print(f"Version CUDA : {torch.version.cuda}")
     print("=" * 60)
     return device, is_xla
+
+class HardwareTimer:
+    def __init__(self, is_xla=False):
+        self.is_xla = is_xla
+        self.t0 = None
+    def start(self):
+        if self.is_xla:
+            import torch_xla.core.xla_model as xm
+            xm.mark_step()
+        self.t0 = time.perf_counter()
+    def stop(self):
+        if self.is_xla:
+            import torch_xla.core.xla_model as xm
+            xm.mark_step()
+        return time.perf_counter() - self.t0
+
+def save_checkpoint(state, path, is_xla=False):
+    if is_xla:
+        import torch_xla.core.xla_model as xm
+        xm.save(state, path)
+    else:
+        torch.save(state, path)
+
+def xla_sync():
+    import torch_xla
+    if hasattr(torch_xla, "sync"):
+        torch_xla.sync()
+    else:
+        torch_xla.core.xla_model.mark_step()

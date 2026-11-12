@@ -1,5 +1,4 @@
 from bacasable_efm import champ_exact
-from bacasable_ot import matrice_cout
 
 from scipy.integrate import solve_ivp
 
@@ -53,26 +52,31 @@ def generer_paires(n, data):
 
 def champ_reflow_nw(x, t, z, g, eps=0.05):
     instant_i=z+t*(g-z)
-    distance = np.sum((x - instant_i) ** 2, axis=1)        
+    distance = np.sum((x[:, None, :] - instant_i[None, :, :]) ** 2, axis=2)
     lambda_i = np.exp(-distance / (2 * eps ** 2))
-    lambda_i = lambda_i / lambda_i.sum()                       
-    moy = lambda_i @ instant_i                                    
-    return (moy - x) / max(1 - t, eps)   
+    lambda_i = lambda_i / np.maximum(lambda_i.sum(axis=1, keepdims=True), 1e-12)
+    moy = lambda_i @ g
+    return (moy - x) / max(1 - t, eps)
 
 def entrainer_mlp_reflow(Z, G, n_epochs=2000, lr=1e-3):
+
     return 
 
 def integrer_euler(champ, z, n_pas, retour_trajet=False):  
-    if retour_trajet:
-        t_eval = np.linspace(0.0, 1 - 1e-4, n_pas)/n_pas
+    dt = (1-1e-4 )/n_pas
+    x=z.copy()
+    if retour_trajet == True:
+        l = [x.copy()]
+    for i in range(n_pas-1):
+        t = i*dt
+        v = champ[x,t]
+        x=x+dt*v
+        l.append(x)
+
+    if retour_trajet == False:
+        return x
     else:
-        t_eval = [1 - 1e-4]/n_pas
-
-
-    if retour_trajet:
-        trajets = sol.y.T.reshape(201, -1, 2)   
-        return trajets[-1], trajets                 
-    return sol.y[:, -1].reshape(-1, 2)
+        return x, np.array(l)
 
 def cout_transport(Z, G):
     return np.square(np.linalg.norm(Z-G))/len(Z)
@@ -87,13 +91,15 @@ def cote(a, b, c):
 def segments_se_croisent(p1, q1, p2, q2):
     return (cote(p1, q1, p2) * cote(p1, q1, q2) < 0) and (cote(p2, q2, p1) * cote(p2, q2, q1) < 0)
 
-def compter_croisements(Z, G):
+def croisements(Z, G):
     acc = 0
+    l = []
     for i in range(len(Z) - 1):
         for j in range(i + 1, len(Z)):
             if segments_se_croisent(Z[i], G[i], Z[j], G[j]):
                 acc += 1
-    return acc
+                l.append([(i,j)])
+    return acc, l
 
 def rectitude(trajets, Z, G):
     trajet_ligne = np.sum((Z-G)**2, axis=1)
@@ -107,7 +113,7 @@ def distance_w1(echantillons, data):
     x1f = data.reshape(data.shape[0], -1).float() 
     n0 = (x0f ** 2).sum(dim=1, keepdim=True) 
     n1 = (x1f ** 2).sum(dim=1).unsqueeze(0)   
-    C=np.sqrt(n0 + n1 -2*x0f@x1f.T)
+    C=np.sqrt(np.maximum(n0 + n1 -2*x0f@x1f.T), 0)
     a = (1/n)*np.ones(n)
     b = (1/m)*np.ones(m)
     return emd2(a, b, C)
@@ -118,7 +124,7 @@ def courbe_erreur_nfe(champ, data, bruits, liste_pas=(1, 2, 4, 8, 20),n_test=200
         d[i] = distance_w1(integrer_euler(champ, bruits, i), data)
     return d
 
-def figure_trajectoires(trajets_base, trajets_reflow, data, chemin, n_traj=30):
+def figure_trajectoires(trajets_base, trajets_reflow, data, chemin, n_traj=30): #généré par IA
     """Deux panneaux : trajectoires du champ de base vs champ reflow.
     trajets_* : (K+1, n, 2) — axe 0 = temps. Mêmes départs des deux côtés."""
     fig, (ax_g, ax_d) = plt.subplots(1, 2, figsize=(11, 5))
@@ -148,7 +154,7 @@ def figure_trajectoires(trajets_base, trajets_reflow, data, chemin, n_traj=30):
     fig.savefig(chemin, dpi=150)
     plt.close(fig)
 
-def figure_croisements(Z_a, G_a, Z_b, G_b, chemin, n_seg=500):
+def figure_croisements(Z_a, G_a, Z_b, G_b, chemin, n_seg=500): #généré par IA
     """Gauche : couplage indépendant. Droite : couplage reflow.
     Segments gris = non croisés, rouges = impliqués dans un croisement.
     Le compte dans le titre porte sur le couplage COMPLET, pas le sous-échantillon."""
@@ -159,7 +165,7 @@ def figure_croisements(Z_a, G_a, Z_b, G_b, chemin, n_seg=500):
         (ax_d, Z_b, G_b, "Couplage reflow"),
     ]:
         n = len(Z)
-        total, paires = compter_croisements(Z, G)          # comptage complet
+        total, paires = croisements(Z, G)          # comptage complet
         croises = {i for i, j in paires} | {j for i, j in paires}
 
         sous = np.random.choice(n, size=min(n_seg, n), replace=False)
@@ -181,7 +187,7 @@ def figure_croisements(Z_a, G_a, Z_b, G_b, chemin, n_seg=500):
     fig.savefig(chemin, dpi=150)
     plt.close(fig)
 
-def figure_nfe(courbes, chemin):
+def figure_nfe(courbes, chemin): #généré par IA
     """W1 vs nombre de pas, une courbe par champ.
     courbes : {nom du champ -> {k -> W1}}, le dict rendu par courbe_erreur_nfe."""
     fig, ax = plt.subplots(figsize=(7, 5))

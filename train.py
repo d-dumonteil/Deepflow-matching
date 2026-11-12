@@ -12,6 +12,7 @@ from data.dataset import get_cifar10_loader
 from utils.ema import EMA
 from utils.ot_matching import obtenir_appariement, cout_transport_batch
 from utils.gpu import setup_device_and_env, HardwareTimer, save_checkpoint
+from utils.gpu import xla_sync
 from solvers.ode import sample_euler
 
 
@@ -50,9 +51,9 @@ def train(cfg: DictConfig):
     appariement = obtenir_appariement(cfg.training.get("matching", "random"))
 
     use_cuda_amp = (not is_xla) and (device.type == "cuda")
-    scaler = torch.cuda.amp.GradScaler(enabled=use_cuda_amp)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_cuda_amp)
     amp_dtype = torch.bfloat16 if is_xla else torch.float16
-    amp_device = "xla" if is_xla else "cuda"
+    amp_device = str(device.type) if is_xla else "cuda"   # "tpu" sur Colab, "xla" sur Kaggle
 
     epochs = cfg.training.epochs
     best_loss = float("inf")
@@ -68,6 +69,7 @@ def train(cfg: DictConfig):
             x1 = x1.to(device, non_blocking=True)
             b = x1.shape[0]
             x0 = torch.randn_like(x1)
+            x1_org = x1
             x1, perm = appariement(x0, x1) 
             t = torch.rand(b, device=device)
             t_expand = t.view(b, 1, 1, 1)
@@ -87,16 +89,14 @@ def train(cfg: DictConfig):
                 scaler.update()
             else:
                 loss.backward()
+                optimizer.step()
                 if is_xla:
-                    import torch_xla.core.xla_model as xm
-                    xm.optimizer_step(optimizer)
-                else:
-                    optimizer.step()
+                    xla_sync()
 
             ema.update(model)
             total_loss += loss.item()
             if i_batch == len(loader) - 1:   #dernier batch seulement
-                cout_ot = cout_transport_batch(x0, x1, perm, reduction="mean").item()
+                cout_ot = cout_transport_batch(x0, x1_org, perm, reduction="mean").item()
                 writer.add_scalar("OT/CoutTransport", cout_ot, epoch)
 
         epoch_time = timer.stop()
