@@ -1,12 +1,13 @@
 from bacasable_efm import champ_exact
 
 from scipy.integrate import solve_ivp
+from scipy.optimize import linear_sum_assignment
 
 import numpy as np
 import torch 
 import math as mt
-from ot import emd2
 import matplotlib.pyplot as plt
+
 
 from matplotlib.ticker import NullFormatter
 
@@ -59,7 +60,48 @@ def champ_reflow_nw(x, t, z, g, eps=0.05):
     return (moy - x) / max(1 - t, eps)
 
 def entrainer_mlp_reflow(Z, G, n_epochs=2000, lr=1e-3):
+    torch.manual_seed(0)
 
+    Z_t = torch.tensor(Z, dtype=torch.float32) 
+    G_t = torch.tensor(G, dtype=torch.float32) 
+    
+
+
+    modele = torch.nn.Sequential(
+        torch.nn.Linear(3, 64),
+        torch.nn.ReLU(),
+        torch.nn.Linear(64, 64),
+        torch.nn.ReLU(),
+        torch.nn.Linear(64, 2),
+    )
+
+    opt = torch.optim.Adam(modele.parameters(), lr=1e-3)
+    paires = torch.randint(0,len(Z), (512)) 
+    z = Z_t[paires]
+    g = G_t[paires]
+
+    t = torch.rand((512,1))
+
+    x = z+t*(g-z)
+
+    entry = torch.cat((x,t), axis=0)
+
+    cible = g-z
+
+    pred = modele(entry)
+
+
+    perte = ((pred - cible) ** 2).mean()
+
+    opt.zero_grad()
+    perte.backward()
+    opt.step()
+
+    torch.nn.functional.mse_loss(pred, cible)
+    with torch.no_grad():
+        resultat = modele(entree)
+
+                            
     return 
 
 def integrer_euler(champ, z, n_pas, retour_trajet=False):  
@@ -67,11 +109,12 @@ def integrer_euler(champ, z, n_pas, retour_trajet=False):
     x=z.copy()
     if retour_trajet == True:
         l = [x.copy()]
-    for i in range(n_pas-1):
+    for i in range(n_pas):
         t = i*dt
-        v = champ[x,t]
+        v = champ(x,t)
         x=x+dt*v
-        l.append(x)
+        if retour_trajet == True:
+            l.append(x)
 
     if retour_trajet == False:
         return x
@@ -103,20 +146,19 @@ def croisements(Z, G):
 
 def rectitude(trajets, Z, G):
     trajet_ligne = np.sum((Z-G)**2, axis=1)
-    trajet_courbe = np.sum(trajets.diff**2, axis=1)
+    trajet_courbe = np.sum(np.diff(trajets, axis=0)**2, axis=1)
     return trajet_courbe/trajet_ligne
 
-def distance_w1(echantillons, data):
+def distance_w1(echantillons, data): #faut des tailles égales 
     n = len(echantillons)
     m = len(data)
-    x0f = echantillons.reshape(echantillons.shape[0], -1).float() 
-    x1f = data.reshape(data.shape[0], -1).float() 
+    x0f = echantillons.reshape(echantillons.shape[0], -1) 
+    x1f = data.reshape(data.shape[0], -1)
     n0 = (x0f ** 2).sum(dim=1, keepdim=True) 
     n1 = (x1f ** 2).sum(dim=1).unsqueeze(0)   
-    C=np.sqrt(np.maximum(n0 + n1 -2*x0f@x1f.T), 0)
-    a = (1/n)*np.ones(n)
-    b = (1/m)*np.ones(m)
-    return emd2(a, b, C)
+    C=np.sqrt(np.maximum(n0 + n1 -2*x0f@x1f.T, 0))
+    lignes, colonnes = linear_sum_assignment(C)
+    return C[lignes, colonnes].sum() / len(echantillons)
 
 def courbe_erreur_nfe(champ, data, bruits, liste_pas=(1, 2, 4, 8, 20),n_test=2000):
     d = {}
