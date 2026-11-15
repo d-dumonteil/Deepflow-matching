@@ -5,13 +5,16 @@ np.random.seed(42)
 
 
 def champ_exact(x, t, data, eps=1e-4):
-    x = np.atleast_1d(np.asarray(x, dtype=float))              
-    data = np.asarray(data, dtype=float).reshape(-1, x.size)   
-    distance = np.sum((x - t * data) ** 2, axis=1)             
+    x_arr = np.asarray(x, dtype=float)
+    point_unique = (x_arr.ndim == 1)                     
+    xb = np.atleast_2d(x_arr) 
+    data = np.asarray(data, dtype=float).reshape(-1, xb.shape[-1])  
+    distance = np.sum((xb[:, None, :] - t * data[None, :, :]) ** 2, axis=2) 
     lambda_i = np.exp(-distance / (2 * max(1 - t, eps) ** 2))
-    lambda_i = lambda_i / lambda_i.sum()                       
-    moy = lambda_i @ data                                      
-    return (moy - x) / max(1 - t, eps)                         
+    lambda_i = lambda_i / np.maximum(lambda_i.sum(axis=1, keepdims=True), 1e-12)
+    moy = lambda_i @ data  
+    v = (moy - xb) / max(1 - t, eps)
+    return v.reshape(-1) if point_unique else v                      
 
 
 def cible_efm(x0, x1, t, autres, eps=1e-4):

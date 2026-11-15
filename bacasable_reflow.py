@@ -7,7 +7,7 @@ import numpy as np
 import torch 
 import math as mt
 import matplotlib.pyplot as plt
-
+import os 
 
 from matplotlib.ticker import NullFormatter
 
@@ -20,7 +20,7 @@ def generer_donnees_bacasable_2d(n_par_amas, forme="croissants"):
         B = np.random.uniform(0,np.pi,n_par_amas)
         A=np.column_stack([np.cos(A), np.sin(A)])
         B=np.column_stack([1-np.cos(B), 0.5-np.sin(B)])
-        data = np.vstack([A, B])                    # (2n, 2)
+        data = np.vstack([A, B]) # (2n, 2)
         return data + np.random.normal(0, 0.1, data.shape)  # on épaissit les arcs
     else:
         return np.random.normal(0,1,(n_par_amas*2,2))
@@ -51,7 +51,7 @@ def generer_paires(n, data):
     g=integrer_rk45(z, data)
     return z,g
 
-def champ_reflow_nw(x, t, z, g, eps=0.05):
+def champ_reflow_nw(x, t, z, g, eps=1e-4):
     instant_i=z+t*(g-z)
     distance = np.sum((x[:, None, :] - instant_i[None, :, :]) ** 2, axis=2)
     lambda_i = np.exp(-distance / (2 * eps ** 2))
@@ -97,7 +97,15 @@ def entrainer_mlp_reflow(Z, G, n_epochs=2000, lr=1e-3):
         perte.backward()
         opt.step()
 
-    return 
+    modele.eval()
+
+    def vitesse(x,t):
+        with torch.no_grad(): # torch inutile à l'évalutation
+            xt = torch.tensor(np.atleast_2d(x), dtype=torch.float32)
+            tt = torch.full((len(xt), 1), float(t))
+            sortie = modele(torch.cat((xt, tt), dim=1))
+        return sortie.numpy()
+    return vitesse
 
 def integrer_euler(champ, z, n_pas, retour_trajet=False):  
     dt = (1-1e-4 )/n_pas
@@ -140,16 +148,16 @@ def croisements(Z, G):
     return acc, l
 
 def rectitude(trajets, Z, G):
-    trajet_ligne = np.sum((Z-G)**2, axis=1)
-    trajet_courbe = np.sum(np.diff(trajets, axis=0)**2, axis=1)
-    return trajet_courbe/trajet_ligne
+    trajet_ligne = np.sum(np.sqrt((Z-G)**2), axis=1)
+    trajet_courbe = np.sqrt(np.sum(np.diff(trajets, axis=0)**2, axis=2))
+    return trajet_courbe/np.maximum(trajet_ligne, 1e-8)
 
-def distance_w1(echantillons, data): #faut des tailles égales 
+def distance_w1(echantillons, data): #faut des tailles égales pr scipy
     n = len(echantillons)
     m = len(data)
     x0f = echantillons.reshape(echantillons.shape[0], -1) 
     x1f = data.reshape(data.shape[0], -1)
-    n0 = (x0f ** 2).sum(axis=1, keepdim=True) 
+    n0 = (x0f ** 2).sum(axis=1, keepdims=True) 
     n1 = (x1f ** 2).sum(axis=1)[None, :]
     C=np.sqrt(np.maximum(n0 + n1 -2*x0f@x1f.T, 0))
     lignes, colonnes = linear_sum_assignment(C)
@@ -245,8 +253,56 @@ def figure_nfe(courbes, chemin): #généré par IA
     fig.savefig(chemin, dpi=150)
     plt.close(fig)
 
-def main(): 
+def main(): #généré par IA
+    os.makedirs("figures", exist_ok=True)
 
+    # ---------- données et paires ----------
+    data = generer_donnees_bacasable_2d(1000)
+    Z, G = generer_paires(5000, data)
+
+    # couplage indépendant : mêmes Z, points de data tirés au hasard
+    G_ind = data[np.random.randint(0, len(data), size=len(Z))]
+
+    # ---------- T1 : croisements (sous-échantillon commun de 1000) ----------
+    n_c = 1000
+    nb_ind, _ = croisements(Z[:n_c], G_ind[:n_c])
+    nb_ref, _ = croisements(Z[:n_c], G[:n_c])
+    print(f"Croisements sur {n_c} segments — "
+          f"indépendant : {nb_ind} | reflow : {nb_ref} | "
+          f"rapport : {nb_ind / max(nb_ref, 1):.2f}")
+
+    # ---------- T2 : coût de transport ----------
+    print(f"Coût — reflow : {cout_transport(Z, G):.4f} | "
+          f"indépendant : {cout_transport(Z, G_ind):.4f}")
+
+    # ---------- les trois champs ----------
+    champ_base = lambda x, t: champ_exact(x, t, data)
+    champ_nw = lambda x, t: champ_reflow_nw(x, t, Z, G)
+    vitesse_mlp = entrainer_mlp_reflow(Z, G)
+
+    # ---------- bruits de test frais : tirés une seule fois, partagés partout ----------
+    bruits_test = generer_bruits(2000)
+
+    # ---------- T4 : courbes NFE ----------
+    courbes = {
+        "base": courbe_erreur_nfe(champ_base, data, bruits_test),
+        "NW":   courbe_erreur_nfe(champ_nw,   data, bruits_test),
+        "MLP":  courbe_erreur_nfe(vitesse_mlp, data, bruits_test),
+    }
+    for nom, d in courbes.items():
+        print(nom, {k: round(v, 4) for k, v in d.items()})
+
+    # ---------- T3 : rectitude (200 trajectoires avec trajets) ----------
+    _, traj_base = integrer_rk45(bruits_test[:200], data, retour_trajet=True)
+    _, traj_nw = integrer_euler(champ_nw, bruits_test[:200], 50, retour_trajet=True)
+    print(f"Rectitude — base : "
+          f"{rectitude(traj_base, bruits_test[:200], traj_base[-1]):.3f} | "
+          f"NW : {rectitude(traj_nw, bruits_test[:200], traj_nw[-1]):.3f}")
+
+    # ---------- figures ----------
+    figure_trajectoires(traj_base, traj_nw, data, "figures/trajectoires.png")
+    figure_croisements(Z[:n_c], G_ind[:n_c], Z[:n_c], G[:n_c], "figures/croisements.png")
+    figure_nfe(courbes, "figures/nfe.png")
     return 0
 
 if __name__ == "__main__":
