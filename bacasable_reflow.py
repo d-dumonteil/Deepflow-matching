@@ -64,44 +64,39 @@ def entrainer_mlp_reflow(Z, G, n_epochs=2000, lr=1e-3):
 
     Z_t = torch.tensor(Z, dtype=torch.float32) 
     G_t = torch.tensor(G, dtype=torch.float32) 
-    
-
 
     modele = torch.nn.Sequential(
-        torch.nn.Linear(3, 64),
-        torch.nn.ReLU(),
-        torch.nn.Linear(64, 64),
-        torch.nn.ReLU(),
-        torch.nn.Linear(64, 2),
-    )
+                torch.nn.Linear(3, 64),
+                torch.nn.ReLU(),
+                torch.nn.Linear(64, 64),
+                torch.nn.ReLU(),
+                torch.nn.Linear(64, 2),
+            )
 
-    opt = torch.optim.Adam(modele.parameters(), lr=1e-3)
-    paires = torch.randint(0,len(Z), (512)) 
-    z = Z_t[paires]
-    g = G_t[paires]
+    opt = torch.optim.Adam(modele.parameters(), lr)
 
-    t = torch.rand((512,1))
+    for i in range(n_epochs):
+        paires = torch.randint(0,len(Z), (512)) 
+        z = Z_t[paires]
+        g = G_t[paires]
 
-    x = z+t*(g-z)
+        t = torch.rand((512,1))
 
-    entry = torch.cat((x,t), axis=0)
+        x = z+t*(g-z)
 
-    cible = g-z
+        entry = torch.cat((x,t), dim=1)
 
-    pred = modele(entry)
+        cible = g-z
+
+        pred = modele(entry)
 
 
-    perte = ((pred - cible) ** 2).mean()
+        perte = ((pred - cible) ** 2).mean()
 
-    opt.zero_grad()
-    perte.backward()
-    opt.step()
+        opt.zero_grad()
+        perte.backward()
+        opt.step()
 
-    torch.nn.functional.mse_loss(pred, cible)
-    with torch.no_grad():
-        resultat = modele(entree)
-
-                            
     return 
 
 def integrer_euler(champ, z, n_pas, retour_trajet=False):  
@@ -141,7 +136,7 @@ def croisements(Z, G):
         for j in range(i + 1, len(Z)):
             if segments_se_croisent(Z[i], G[i], Z[j], G[j]):
                 acc += 1
-                l.append([(i,j)])
+                l.append((i,j))
     return acc, l
 
 def rectitude(trajets, Z, G):
@@ -154,8 +149,8 @@ def distance_w1(echantillons, data): #faut des tailles égales
     m = len(data)
     x0f = echantillons.reshape(echantillons.shape[0], -1) 
     x1f = data.reshape(data.shape[0], -1)
-    n0 = (x0f ** 2).sum(dim=1, keepdim=True) 
-    n1 = (x1f ** 2).sum(dim=1).unsqueeze(0)   
+    n0 = (x0f ** 2).sum(axis=1, keepdim=True) 
+    n1 = (x1f ** 2).sum(axis=1)[None, :]
     C=np.sqrt(np.maximum(n0 + n1 -2*x0f@x1f.T, 0))
     lignes, colonnes = linear_sum_assignment(C)
     return C[lignes, colonnes].sum() / len(echantillons)
