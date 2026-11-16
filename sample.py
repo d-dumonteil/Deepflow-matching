@@ -13,7 +13,9 @@ except (ImportError, RuntimeError):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 model = UNetSmall().to(device)
-model.load_state_dict(torch.load("model_baseline.pt", map_location=device, weights_only=True))
+checkpoint = torch.load("model_baseline.pt", map_location=device, weights_only=True)
+state = checkpoint["model_state"] if "model_state" in checkpoint else checkpoint
+model.load_state_dict(state)
 model.eval()
 
 print(f"Génération de 16 échantillons sur {device}...")
