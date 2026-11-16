@@ -231,7 +231,7 @@ def main():
     # Torch >= 2.14 : le ScriptModule Inception échoue sur Module.to(),
     # même vers CPU. Patch + exécution CPU hors CUDA.
     try:
-        fid_device = device if is_cuda else torch.device("cpu")
+        fid_device = "cuda" if is_cuda else "cpu"
         if not is_cuda:
             _patch_cleanfid_inception()
             print("Patch clean-fid appliqué (conversion .to neutralisée) : Clean-FID sur CPU.")
@@ -243,6 +243,7 @@ def main():
             dataset_split="train",
             mode="clean",
             device=fid_device,
+            use_dataparallel=False,
         )
         print(f"Score Clean-FID (Inception-v3) : {clean_fid_score:.2f}")
     except Exception as e:
