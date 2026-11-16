@@ -2,6 +2,8 @@ import torch
 import torchvision.utils as vutils
 from models.unet import UNetSmall
 from solvers.euler import sample_euler
+from utils.gpu import setup_device_and_env 
+device, _ = setup_device_and_env()
 
 # Détection automatique du device
 try:

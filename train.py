@@ -51,10 +51,11 @@ def train(cfg: DictConfig):
     loader = get_cifar10_loader(batch_size=cfg.training.batch_size, device=device)
     appariement = obtenir_appariement(cfg.training.get("matching", "random"))
 
-    use_cuda_amp = (not is_xla) and (device.type == "cuda")
+    is_tpu = is_xla or (str(getattr(device, "type", "")) == "tpu")
+    use_cuda_amp = (not is_tpu) and (device.type == "cuda")
     scaler = torch.amp.GradScaler("cuda", enabled=use_cuda_amp)
-    amp_dtype = torch.bfloat16 if is_xla else torch.float16
-    amp_device = str(device.type) if is_xla else "cuda"   # "tpu" sur Colab, "xla" sur Kaggle
+    amp_dtype = torch.bfloat16 if is_tpu else torch.float16
+    amp_device = str(device.type) if is_tpu else "cuda"
 
     epochs = cfg.training.epochs
     best_loss = float("inf")
@@ -98,7 +99,7 @@ def train(cfg: DictConfig):
 
             optimizer.zero_grad(set_to_none=True)
 
-            with torch.autocast(device_type=amp_device, dtype=amp_dtype, enabled=(is_xla or use_cuda_amp)):
+            with torch.autocast(device_type=amp_device, dtype=amp_dtype, enabled=(is_tpu or use_cuda_amp)):
                 pred = model(xt, t)
                 loss = torch.mean((pred - target) ** 2)
 
