@@ -40,7 +40,7 @@ CIFAR_TRANSFORM = transforms.Compose([
 def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     """Distance de Fréchet entre deux gaussiennes multivariées (calcul analytique)."""
     diff = mu1 - mu2
-    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    covmean = linalg.sqrtm(sigma1.dot(sigma2))
     if not np.isfinite(covmean).all():
         offset = np.eye(sigma1.shape[0]) * eps
         covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
@@ -50,9 +50,19 @@ def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
     return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
 
 
+def _patch_cleanfid_inception():
+    """Torch >= 2.14 : Module.to() échoue sur le ScriptModule Inception de clean-fid
+    ('param must be a Parameter'), y compris vers CPU. Le TorchScript est déjà chargé
+    sur CPU : neutraliser .to() pour cette classe uniquement suffit."""
+    import cleanfid.features as cff
+    if not getattr(cff.InceptionV3W, "_to_neutralise", False):
+        cff.InceptionV3W.to = lambda self, *args, **kwargs: self
+        cff.InceptionV3W._to_neutralise = True
+
+
 @torch.inference_mode()
 def _dinov2_features(loader, device, desc):
-    """Embeddings DINOv2 (ViT-B/14) d'un DataLoader ; mu et sigma des features."""
+    """Embeddings DINOv2 (ViT-B/14) d'un DataLoader ; retourne mu et sigma des features."""
     dinov2 = torch.hub.load("facebookresearch/dinov2", "dinov2_vitb14")
     dinov2 = dinov2.to(device)
     dinov2.eval()
@@ -105,7 +115,7 @@ def dinov2_stats_reference(device, cache_path, n_ref):
 
 
 def _save_batch_worker(cpu_imgs, start_idx, target_dir):
-    """Écriture PNG parallélisée."""
+    """Écriture PNG parallélisée sur disque."""
     for i in range(cpu_imgs.shape[0]):
         vutils.save_image(cpu_imgs[i], os.path.join(target_dir, f"{start_idx + i:05d}.png"))
 
@@ -217,13 +227,14 @@ def main():
         os.makedirs(sub_img_dir, exist_ok=True)
         generer_images(model, device, sub_img_dir, is_cuda, is_tpu)
 
-    # --- 1. Clean-FID (Inception-v3, TorchScript) ---
-    # TorchScript est incompatible avec le plugin torch_tpu (param must be a Parameter) :
-    # hors CUDA, l'extraction se fait sur CPU.
+    # --- 1. Clean-FID (Inception-v3) ---
+    # Torch >= 2.14 : le ScriptModule Inception échoue sur Module.to(),
+    # même vers CPU. Patch + exécution CPU hors CUDA.
     try:
         fid_device = device if is_cuda else torch.device("cpu")
         if not is_cuda:
-            print("Inception TorchScript incompatible avec ce backend : Clean-FID sur CPU.")
+            _patch_cleanfid_inception()
+            print("Patch clean-fid appliqué (conversion .to neutralisée) : Clean-FID sur CPU.")
         print("\n--- 1. Évaluation Clean-FID (Inception-v3) ---")
         clean_fid_score = fid.compute_fid(
             fdir1=sub_img_dir,
@@ -237,7 +248,8 @@ def main():
     except Exception as e:
         print(f"Clean-FID échoué : {type(e).__name__}: {e}")
 
-    # --- 2. FID DINOv2 (ViT-B/14), référence CIFAR-10 cachée ---
+    # --- 2. FID DINOv2 (ViT-B/14), référence CIFAR-10 mise en cache ---
+    # Métrique relative : comparer vos variantes entre elles, pas à la littérature.
     try:
         print("\n--- 2. Évaluation FID DINOv2 (ViT-B/14) ---")
         cache_path = os.path.join(CACHE_DIR, "dinov2_ref_cifar10.npz")
