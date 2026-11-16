@@ -1,5 +1,6 @@
 import os
 import random
+import glob
 import numpy as np
 import torch
 import hydra
@@ -58,9 +59,27 @@ def train(cfg: DictConfig):
     epochs = cfg.training.epochs
     best_loss = float("inf")
 
+    save_root = os.environ.get("FLOW_SAVE_DIR", orig_cwd)
+    os.makedirs(save_root, exist_ok=True)
+
+    start_epoch = 1
+    dernier_ckpt = max(
+        glob.glob(os.path.join(save_root, f"checkpoint_seed_{seed}_ep*.pt")),
+        key=lambda p: int(p.rsplit("ep", 1)[1].split(".")[0]),
+        default=None,
+    )
+    if dernier_ckpt is not None:
+        ckpt = torch.load(dernier_ckpt, map_location=device, weights_only=True)
+        model.load_state_dict(ckpt["model_state"])
+        optimizer.load_state_dict(ckpt["optimizer_state"])
+        ema.shadow = {k: v.to(device) for k, v in ckpt["ema_state"].items()}
+        start_epoch = ckpt["epoch"] + 1
+        best_loss = ckpt["loss"]
+        print(f"Reprise depuis {dernier_ckpt} à l'époque {start_epoch}.")
+
     print(f"Démarrage de l'entraînement (graine {seed}) pour {epochs} époques...")
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch, epochs + 1):
         model.train()
         total_loss = 0.0
         timer.start()
