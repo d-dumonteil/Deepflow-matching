@@ -136,7 +136,7 @@ def train(cfg: DictConfig):
                 "seed": seed,
                 "loss": mean_loss,
             }
-            ckpt_path = os.path.join(orig_cwd, f"checkpoint_seed_{seed}_ep{epoch}.pt")
+            ckpt_path = os.path.join(save_root, f"checkpoint_seed_{seed}_ep{epoch}.pt")
             save_checkpoint(ckpt_state, ckpt_path, is_xla=is_xla)
 
         if epoch % cfg.logging.sample_every == 0:
@@ -151,7 +151,7 @@ def train(cfg: DictConfig):
 
     # Sauvegarde finale avec application des poids lissés EMA
     ema.apply_shadow(model)
-    final_path = os.path.join(orig_cwd, cfg.training.save_name)
+    final_path = os.path.join(save_root, cfg.training.save_name)
     save_checkpoint({"model_state": model.state_dict()}, final_path, is_xla=is_xla)
     print(f"Modèle EMA final sauvegardé sous {final_path}.")
     writer.close()
