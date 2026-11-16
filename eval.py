@@ -233,7 +233,7 @@ def main():
     try:
         fid_device = "cuda" if is_cuda else "cpu"
         if not is_cuda:
-            _patch_cleanfid_inception()
+            _patch_cleanfid_inception() 
             print("Patch clean-fid appliqué (conversion .to neutralisée) : Clean-FID sur CPU.")
         print("\n--- 1. Évaluation Clean-FID (Inception-v3) ---")
         clean_fid_score = fid.compute_fid(
