@@ -1,6 +1,7 @@
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 np.random.seed(42)
 
 
@@ -28,7 +29,7 @@ def cible_efm(x0, x1, t, autres, eps=1e-4):
     lambda_i = lambda_i / lambda_i.sum()
     moy = lambda_i @ support                             
     return (moy - x_t) / max(1 - t, eps)
-
+@torch.no_grad()
 def cible_efm_vectorise(xt, t, support, eps=1e-2):
     t = torch.clamp(t, max=1.0 - eps) # denominateur non nul
     xt_m = xt[:, None] 
@@ -47,6 +48,11 @@ def creer_support(x1, M, data, generator=None):
     support[:, 0] = x1
     support[:,1:] = data[indices]
     return support
+
+def efm_loss(support, eps = 1e-2, t, xt, v_theta):
+    a = cible_efm_vectorise(xt, t, support, eps)
+    loss = F.mse_loss(v_theta, a)
+    return loss
 
 
 
