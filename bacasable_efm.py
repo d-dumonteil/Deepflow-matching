@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+import torchvision
 np.random.seed(42)
 
 
@@ -54,9 +55,36 @@ def efm_loss(support, eps = 1e-2, t, xt, v_theta):
     loss = F.mse_loss(v_theta, a)
     return loss
 
+def train_step_efm(model, x1, dataset, optimizer, M, generator=None, eps=1e-2):
+    x0 = torch.randn_like(x1, generator=generator)
+    t = torch.rand(x1.size(0), device=x1.device, generator=generator)
+    t = torch.clamp(t, max=1.0 - eps)
+    xt = (1-t[:, None, None, None])*x0 + t[:, None, None, None]*x1
+    support = creer_support(x1, M, dataset, generator)
+    amp_dtype = torch.float16 if x1.device.type == "cuda" else torch.bfloat16
+    with torch.autocast(device=x1.device_type, dtype=amp_dtype):
+        v_theta = model(xt, t)
+    loss = efm_loss(support, eps, t, xt, v_theta)
+
+    optimizer.zero_grad()
+    loss.backward()
+    if x1.device.type == "xla":
+        import torch_xla.core.xla_model as xm
+        xm.optimizer.step(optimizer)
+    else:
+        optimizer.step()
+    return loss.item()
 
 
-
+def preload_data():
+    transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ])
+    dataset = torchvision.datasets.CIFAR10(
+        root="./data_cifar", train=True, download=True, transform=transform
+        )
+    #pas fini
 
 def tirer_support(M, data):
     tirage = np.random.choice(len(data), M - 1, replace=False)
