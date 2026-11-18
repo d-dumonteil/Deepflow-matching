@@ -5,13 +5,6 @@ from solvers.euler import sample_euler
 from utils.gpu import setup_device_and_env 
 device, _ = setup_device_and_env()
 
-# Détection automatique du device
-try:
-    import torch_xla.core.xla_model as xm
-    device = xm.xla_device()
-except (ImportError, RuntimeError):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 model = UNetSmall().to(device)
 checkpoint = torch.load("model_baseline.pt", map_location=device, weights_only=True)
 state = checkpoint["model_state"] if "model_state" in checkpoint else checkpoint
