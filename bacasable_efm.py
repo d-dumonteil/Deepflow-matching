@@ -1,4 +1,7 @@
 
+from unittest import loader
+
+from django.core.files import images
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -76,15 +79,22 @@ def train_step_efm(model, x1, dataset, optimizer, M, generator=None, eps=1e-2):
     return loss.item()
 
 
-def preload_data():
+def preload_data(root="./data_cifar", device=None, dtype=torch.float32, batch_size=512, num_workers=4):
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
         ])
     dataset = torchvision.datasets.CIFAR10(
-        root="./data_cifar", train=True, download=True, transform=transform
+        root=root, train=True, download=True, transform=transform
         )
-    #pas fini
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory = (device is not None and device.type == "cuda"))
+    n, C, H, W = len(dataset), 3, 32, 32
+    t = torch.empty(n, C, H, W, device = device, dtype = dtype)
+    start = 0
+    for images, _ in loader:  #fait avec IA
+        t[start:start+len(images)] = images
+        start += len(images)
+    return t.to(device=device, dtype=dtype)
 
 def tirer_support(M, data):
     tirage = np.random.choice(len(data), M - 1, replace=False)
