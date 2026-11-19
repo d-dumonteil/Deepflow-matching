@@ -181,9 +181,16 @@ def trouver_modele():
 
 
 def images_pretes(output_dir, n_attendu):
-    """Vrai si le dossier local d'images est complet. Listage local : rapide et fiable."""
+    """Vrai si le dossier d'images est complet. Un OSError de montage Drive
+    (Errno 5 sur les très grands dossiers) est traité comme 'dossier absent'."""
     sub = os.path.join(output_dir, "images")
-    return os.path.isdir(sub) and len(os.listdir(sub)) >= n_attendu
+    if not os.path.isdir(sub):
+        return False
+    try:
+        return len(os.listdir(sub)) >= n_attendu
+    except OSError as e:
+        print(f"Listage impossible de {sub} ({e}) : dossier traité comme absent.")
+        return False
 
 
 def generer_images(model, device, sub_img_dir, is_cuda, is_tpu):
