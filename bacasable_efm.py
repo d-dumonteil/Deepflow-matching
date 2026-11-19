@@ -1,4 +1,5 @@
 
+import time
 from unittest import loader
 
 from django.core.files import images
@@ -76,7 +77,7 @@ def train_step_efm(model, x1, dataset, optimizer, M, generator=None, eps=1e-2):
         xm.optimizer.step(optimizer)
     else:
         optimizer.step()
-    return loss.item()
+    return loss
 
 
 def preload_data(root="./data_cifar", device=None, dtype=torch.float32, batch_size=512, num_workers=4):
@@ -95,6 +96,64 @@ def preload_data(root="./data_cifar", device=None, dtype=torch.float32, batch_si
         t[start:start+len(images)] = images
         start += len(images)
     return t.to(device=device, dtype=dtype)
+
+def update_ema(model, ema, decay=0.999):
+    if ema is None:
+        return
+    with torch.no_grad():
+        for param, ema_param in zip(model.parameters(), ema.parameters()):
+            ema_param.data.mul_(decay).add_(param.data, alpha=1 - decay)
+def train_one_epoch(model, loader, dataset_tensor, optimizer, M, device, generator=None, ema=None, use_efm=True, eps=1e-2, log_every=20):
+    model.train()
+    total_loss = 0.0
+    n_batches = 0
+    list_loss = []
+    is_tpu = device.type == "xla"
+    is_cuda = device.type == "cuda"
+    if is_tpu:
+        import torch_xla
+        torch_xla.sync()
+    elif is_cuda:
+        torch.cuda.synchronize()
+    start_time = time.perf_counter()
+    
+    for (x1, labels) in loader:
+        x1 = x1.to(device=device)
+        if use_efm:
+            loss = train_step_efm(model, x1, dataset_tensor, optimizer, M, generator, eps)
+        else:
+            loss = train_step(model, x1, optimizer, eps)
+        total_loss += loss
+        update_ema(model, ema, decay=0.999)
+        if (1+n_batches) % log_every == 0:
+            print(f"Batch {n_batches}, Loss: {loss.item():.4f}")
+        n_batches += 1
+        list_loss.append(loss.item())
+    if is_tpu:
+        torch_xla.sync()
+    elif is_cuda:
+        torch.cuda.synchronize()
+    temps_epoch = time.perf_counter() - start_time
+    loss_moyenne = total_loss / n_batches
+    return {"loss" : loss_moyenne.item(), "temps": temps_epoch, "n_batches": n_batches}
+
+
+
+def mesure_variance(dataset_tensor, liste_M, N_test=100, batch_size=32, device=None, generator=None, eps=1e-2):
+    for M in liste_M:
+        i = torch.randint(0, dataset_tensor.size(0), (N_test,), device=device, generator=generator)
+        x1 = dataset_tensor[i]
+        x0 = torch.randn_like(x1, generator=generator)
+        t = torch.rand(N_test, device=device, generator=generator)
+        t = torch.clamp(t, max=1.0 - eps)
+        xt = (1-t[:, None, None, None])*x0 + t[:, None, None, None]*x1
+        support = creer_support(x1, M, dataset_tensor, generator)
+        a = cible_efm_vectorise(xt, t, support, eps)
+        #ici calculer la variance de la loss sur les N_test échantillons je vois trop encore comment faire
+        variance = 1
+        return {M:variance for M in M_values}
+
+
 
 def tirer_support(M, data):
     tirage = np.random.choice(len(data), M - 1, replace=False)
