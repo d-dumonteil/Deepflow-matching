@@ -20,7 +20,8 @@ NUM_SAMPLES = int(os.environ.get("FLOW_EVAL_N", 50000))
 BATCH_SIZE = int(os.environ.get("FLOW_EVAL_BATCH", 512))
 STEPS = int(os.environ.get("FLOW_EVAL_STEPS", 20))
 METHOD = os.environ.get("FLOW_EVAL_METHOD", "euler")
-OUTPUT_DIR = os.environ.get("FLOW_EVAL_DIR", "generated_cifar10_eval")
+OUTPUT_DIR = os.environ.get("FLOW_EVAL_DIR", "generated_cifar10_eval")  # dossier LOCAL (rapide)
+ARCHIVE = os.environ.get("FLOW_EVAL_TAR", "")                          # archive unique sur Drive
 CACHE_DIR = os.environ.get("FLOW_CACHE_DIR", os.getcwd())   # stats de référence persistantes
 DINO_REF_N = int(os.environ.get("FLOW_DINO_REF_N", 10000))  # taille d'échantillon de référence DINOv2
 CLASSIFIER_PATH = os.environ.get("FLOW_CLASSIFIER", "")     # ResNet-18 CIFAR-10 entraîné (optionnel)
@@ -37,17 +38,21 @@ CIFAR_TRANSFORM = transforms.Compose([
 ])
 
 
-def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
-    """Distance de Fréchet entre deux gaussiennes multivariées (calcul analytique)."""
+def calculate_frechet_distance(mu1, sigma1, mu2, sigma2):
+    """Distance de Fréchet, version numériquement stable (sans sqrtm)."""
     diff = mu1 - mu2
-    covmean = linalg.sqrtm(sigma1.dot(sigma2))
-    if not np.isfinite(covmean).all():
-        offset = np.eye(sigma1.shape[0]) * eps
-        covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
-    if np.iscomplexobj(covmean):
-        covmean = covmean.real
-    tr_covmean = np.trace(covmean)
-    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean
+
+    # racine symétrique de sigma1 par décomposition propre
+    w1, v1 = np.linalg.eigh(sigma1)
+    w1 = np.clip(w1, 0, None)                      # tolère d'infimes valeurs négatives numériques
+    s1 = (v1 * np.sqrt(w1)) @ v1.T
+
+    c = s1 @ sigma2 @ s1                           # symétrique, semi-définie positive
+    w = np.linalg.eigvalsh(c)
+    w = np.clip(w, 0, None)
+    tr_covmean = np.sqrt(w).sum()
+
+    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2.0 * tr_covmean
 
 
 def _patch_cleanfid_inception():
@@ -158,8 +163,11 @@ def compute_cace_and_is(image_dir, device, clf_path, num_classes=10, batch_size=
 
 
 def trouver_modele():
-    save_root = os.environ.get("FLOW_SAVE_DIR", "")
     candidats = []
+    env = os.environ.get("FLOW_MODEL", "")
+    if env:
+        candidats.append(env)
+    save_root = os.environ.get("FLOW_SAVE_DIR", "")
     if save_root:
         candidats.append(os.path.join(save_root, "model_baseline.pt"))
     candidats.append("model_baseline.pt")
@@ -167,9 +175,22 @@ def trouver_modele():
         if os.path.exists(p):
             return p
     raise FileNotFoundError(
-        "model_baseline.pt introuvable. Définissez FLOW_SAVE_DIR (dossier checkpoints "
-        "du Drive) ou créez un symlink dans le répertoire du dépôt."
+        "Modèle introuvable. Définissez FLOW_MODEL (checkpoint d'une variante), "
+        "FLOW_SAVE_DIR (dossier checkpoints du Drive), ou créez un symlink."
     )
+
+
+def images_pretes(output_dir, n_attendu):
+    """Vrai si le dossier d'images est complet. Un OSError de montage Drive
+    (Errno 5 sur les très grands dossiers) est traité comme 'dossier absent'."""
+    sub = os.path.join(output_dir, "images")
+    if not os.path.isdir(sub):
+        return False
+    try:
+        return len(os.listdir(sub)) >= n_attendu
+    except OSError as e:
+        print(f"Listage impossible de {sub} ({e}) : dossier traité comme absent.")
+        return False
 
 
 def generer_images(model, device, sub_img_dir, is_cuda, is_tpu):
@@ -201,6 +222,33 @@ def generer_images(model, device, sub_img_dir, is_cuda, is_tpu):
     print("Écriture disque des PNG finalisée.")
 
 
+def preparer_images(model, device, is_cuda, is_tpu):
+    """Assure la présence des NUM_SAMPLES images dans OUTPUT_DIR (local).
+    1. Dossier local complet -> rien à faire.
+    2. Sinon, extraction de l'archive Drive si elle existe.
+    3. Sinon, génération, puis archivage vers Drive.
+    Jamais 50 000 fichiers individuels sur Drive : une archive unique."""
+    if images_pretes(OUTPUT_DIR, NUM_SAMPLES):
+        print(f"Images déjà présentes dans {OUTPUT_DIR}/images.")
+        return
+
+    if ARCHIVE and os.path.exists(ARCHIVE):
+        print(f"Extraction de {ARCHIVE} vers {OUTPUT_DIR}...")
+        shutil.unpack_archive(ARCHIVE, OUTPUT_DIR)
+        if images_pretes(OUTPUT_DIR, NUM_SAMPLES):
+            print("Extraction terminée.")
+            return
+        print("Archive incomplète : régénération.")
+
+    sub_img_dir = os.path.join(OUTPUT_DIR, "images")
+    os.makedirs(sub_img_dir, exist_ok=True)
+    generer_images(model, device, sub_img_dir, is_cuda, is_tpu)
+
+    if ARCHIVE:
+        print(f"Archivage des images vers {ARCHIVE}...")
+        shutil.make_archive(ARCHIVE[:-4], "tar", root_dir=OUTPUT_DIR, base_dir="images")
+
+
 def main():
     device, is_xla = setup_device_and_env()
     is_tpu = is_xla or (str(getattr(device, "type", "")) == "tpu")
@@ -215,17 +263,10 @@ def main():
     model.eval()
     print(f"Modèle chargé depuis : {model_path}")
 
-    # --- Génération (ignorée si les images existent déjà) ---
+    # --- Images : dossier local + archive unique sur Drive ---
+    preparer_images(model, device, is_cuda, is_tpu)
     sub_img_dir = os.path.join(OUTPUT_DIR, "images")
-    n_existants = len(os.listdir(sub_img_dir)) if os.path.isdir(sub_img_dir) else 0
-    if n_existants >= NUM_SAMPLES:
-        print(f"{n_existants} images déjà présentes dans {sub_img_dir} : génération ignorée.")
-    else:
-        if n_existants > 0:
-            print(f"{n_existants} images incomplètes détectées : régénération totale.")
-            shutil.rmtree(sub_img_dir)
-        os.makedirs(sub_img_dir, exist_ok=True)
-        generer_images(model, device, sub_img_dir, is_cuda, is_tpu)
+    print(f"{NUM_SAMPLES} images disponibles dans {sub_img_dir}.")
 
     # --- 1. Clean-FID (Inception-v3) ---
     # Torch >= 2.14 : le ScriptModule Inception échoue sur Module.to(),
@@ -233,7 +274,7 @@ def main():
     try:
         fid_device = "cuda" if is_cuda else "cpu"
         if not is_cuda:
-            _patch_cleanfid_inception() 
+            _patch_cleanfid_inception()
             print("Patch clean-fid appliqué (conversion .to neutralisée) : Clean-FID sur CPU.")
         print("\n--- 1. Évaluation Clean-FID (Inception-v3) ---")
         clean_fid_score = fid.compute_fid(
@@ -261,7 +302,7 @@ def main():
     except Exception as e:
         print(f"FID DINOv2 échouée : {type(e).__name__}: {e}")
 
-    # --- 3. IS et CACE (nécessitent un classificateur CIFAR-10 entraîné) ---
+    # --- 3. IS et CACE (nécessitent un classificateur CIFRE-10 entraîné) ---
     if CLASSIFIER_PATH and os.path.exists(CLASSIFIER_PATH):
         try:
             print("\n--- 3. Évaluation IS et CACE ---")
